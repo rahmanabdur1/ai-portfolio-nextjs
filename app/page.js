@@ -21,7 +21,7 @@ export default function Home() {
       />
       <div className="absolute px-4 w-full h-screen flex flex-col gap-5 items-center bottom-5">
         <h1 className="text-4xl font-Kanit md:text-5xl font-bold text-white mt-10">
-          Piyush Agarwal&rsquo;s AI Portfolio
+          Chat With&rsquo;s AI Medical
         </h1>
 
         <section className="w-full flex-1 flex flex-col overflow-y-scroll">
@@ -61,7 +61,7 @@ export default function Home() {
             onChange={handleInputChange}
             value={input}
             type="text"
-            placeholder="What's your hometown?"
+            placeholder="What's your Health conditions?"
             className="py-3 px-5 flex-1 rounded text-black text-2xl border-2 border-gray-50 focus:outline-none focus:border-blue-500"
           />
           <button
