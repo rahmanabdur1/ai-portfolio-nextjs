@@ -1,58 +1,74 @@
-import {DataAPIClient} from "@datastax/astra-db-ts";
-import {RecursiveCharacterTextSplitter} from "langchain/text_splitter";
+import { MongoClient } from "mongodb";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import "dotenv/config";
 import OpenAI from "openai";
-import sampleData from "./sample-data.json" with {type: "json"};
+import sampleData from "./sample-data.json" with { type: "json" };
 
+// Initialize OpenAI API
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_KEY
-})
+  apiKey: process.env.OPENAI_KEY,
+});
 
-const client = new DataAPIClient(process.env.ASTRA_DB_APPLICATION_TOKEN)
-const db = client.db(process.env.ASTRA_DB_API_ENDPOINT, {
-    namespace:process.env.ASTRA_DB_NAMESPACE
-})
+// MongoDB Connection
+const client = new MongoClient(process.env.MONGODB_URI);
+const dbName = process.env.MONGODB_DB;
+const collectionName = "portfolio";
 
 const splitter = new RecursiveCharacterTextSplitter({
   chunkSize: 1000,
   chunkOverlap: 200,
 });
 
-const createCollection =async () => {
-    try {
-        await db.createCollection("portfolio", {
-            vector: {
-                dimension: 1536,
-            }
-        })
-    } catch (error) {
-        console.log("Collection Already Exists",error);
-    }
-}
+// Create Collection (if not exists)
+const createCollection = async () => {
+  try {
+    const db = client.db(dbName);
+    const collections = await db.listCollections().toArray();
 
+    if (!collections.some((c) => c.name === collectionName)) {
+      await db.createCollection(collectionName);
+      console.log(`Collection '${collectionName}' created.`);
+    } else {
+      console.log("Collection already exists.");
+    }
+  } catch (error) {
+    console.error("Error creating collection:", error);
+  }
+};
+
+// Load Data into MongoDB
 const loadData = async () => {
-    const collection = await db.collection("portfolio")
+  try {
+    const db = client.db(dbName);
+    const collection = db.collection(collectionName);
+
     for await (const { id, info, description } of sampleData) {
-        const chunks = await splitter.splitText(description);
-        let i = 0;
-        for await (const chunk of chunks) {
-            const { data } = await openai.embeddings.create({
-                input: chunk,
-                model: "text-embedding-3-small"
-            })
+      const chunks = await splitter.splitText(description);
 
-            const res = await collection.insertOne({
-                document_id: id,
-                $vector: data[0]?.embedding,
-                info,
-                description:chunk
-            })
+      for await (const chunk of chunks) {
+        const { data } = await openai.embeddings.create({
+          input: chunk,
+          model: "text-embedding-3-small",
+        });
 
-            i++
-        }
+        await collection.insertOne({
+          document_id: id,
+          embedding: data[0]?.embedding, // Store as "embedding" instead of "$vector"
+          info,
+          description: chunk,
+        });
+      }
     }
+    console.log("Data added successfully.");
+  } catch (error) {
+    console.error("Error loading data:", error);
+  }
+};
 
-    console.log("data added");
-}
-
-createCollection().then(()=>loadData())
+// Connect to MongoDB and execute functions
+client.connect().then(async () => {
+  console.log("Connected to MongoDB.");
+  await createCollection();
+  await loadData();
+  client.close();
+});

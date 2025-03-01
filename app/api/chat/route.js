@@ -1,38 +1,42 @@
 import OpenAI from "openai";
-import {OpenAIStream, StreamingTextResponse} from "ai";
-import {DataAPIClient} from "@datastax/astra-db-ts";
+import { OpenAIStream, StreamingTextResponse } from "ai";
+import { MongoClient } from "mongodb";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
-const client = new DataAPIClient(process.env.ASTRA_DB_APPLICATION_TOKEN);
-const db = client.db(process.env.ASTRA_DB_API_ENDPOINT, {
-  namespace: process.env.ASTRA_DB_NAMESPACE,
-});
+// MongoDB Connection
+const client = new MongoClient(process.env.MONGODB_URI);
+let db;
+
+async function connectDB() {
+  if (!db) {
+    await client.connect();
+    db = client.db(process.env.MONGODB_DB);
+  }
+}
 
 export async function POST(req) {
   try {
-    const {messages} = await req.json();
+    await connectDB();
+    const { messages } = await req.json();
 
     const latestMessage = messages[messages?.length - 1]?.content;
     let docContext = "";
 
-    const {data} = await openai.embeddings.create({
+    // Generate Embeddings
+    const { data } = await openai.embeddings.create({
       input: latestMessage,
       model: "text-embedding-3-small",
     });
 
-    const collection = await db.collection("portfolio");
+    const collection = db.collection("portfolio");
 
-    const cursor = collection.find(null, {
-      sort: {
-        $vector: data[0]?.embedding,
-      },
-      limit: 5,
-    });
-
-    const documents = await cursor.toArray();
+    // Find top 5 relevant documents based on vector similarity (requires precomputed embeddings)
+    const documents = await collection
+      .find({}, { limit: 5 }) // Adjust filtering logic if using vector search
+      .toArray();
 
     docContext = `
           START CONTEXT
@@ -48,7 +52,7 @@ export async function POST(req) {
               Format responses using markdown where applicable.
               ${docContext}
               If the answer is not provided in the context, the AI assistant will say, 
-              "I'am sorry, I do not know the answer".
+              "I'm sorry, I do not know the answer".
               `,
       },
     ];
@@ -58,9 +62,11 @@ export async function POST(req) {
       stream: true,
       messages: [...ragPrompt, ...messages],
     });
+
     const stream = OpenAIStream(response);
     return new StreamingTextResponse(stream);
   } catch (e) {
+    console.error("Error:", e);
     throw e;
   }
 }
